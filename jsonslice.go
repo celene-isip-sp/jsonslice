@@ -11,9 +11,11 @@ package jsonslice
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/bhmj/xpression"
 )
@@ -33,7 +35,8 @@ var (
 	errUnexpectedEnd,
 	errInvalidLengthUsage,
 	errUnexpectedStringEnd,
-	errObjectOrArrayExpected error
+	errObjectOrArrayExpected,
+	errInvalidNowUsage error
 )
 
 func init() {
@@ -59,6 +62,7 @@ func init() {
 	errInvalidLengthUsage = errors.New("length() is only applicable to array or string")
 	errObjectOrArrayExpected = errors.New("object or array expected")
 	errUnexpectedStringEnd = errors.New("unexpected end of string")
+	errInvalidNowUsage = errors.New("now() is only applicable to root")
 }
 
 type word []byte
@@ -383,7 +387,8 @@ func detectFn(path []byte, i int, nod *tNode) (bool, int, error) {
 	}
 	if !(bytes.EqualFold(nod.Keys[0], []byte("length")) ||
 		bytes.EqualFold(nod.Keys[0], []byte("count")) ||
-		bytes.EqualFold(nod.Keys[0], []byte("size"))) {
+		bytes.EqualFold(nod.Keys[0], []byte("size")) ||
+		bytes.EqualFold(nod.Keys[0], []byte("now"))) {
 		return true, i, errPathUnknownFunction
 	}
 	nod.Type |= cFunction
@@ -1114,6 +1119,17 @@ func doFunc(input []byte, nod *tNode) ([]byte, error) {
 		} else {
 			return nil, errInvalidLengthUsage
 		}
+	} else if bytes.Equal(word("now"), nod.Keys[0]) {
+		var val interface{}
+		err = json.Unmarshal(input, &val)
+		if err != nil {
+			return nil, errInvalidNowUsage
+		}
+
+		//parse to ISO8601
+		t := time.Now().Format("2006-01-02T15:04:05.000Z")
+		result, _ := json.Marshal(t)
+		return result, nil
 	}
 	if err != nil {
 		return nil, err
