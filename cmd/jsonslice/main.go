@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/bhmj/jsonslice"
+	"github.com/celene-isip-sp/jsonslice"
 )
 
 func main() {

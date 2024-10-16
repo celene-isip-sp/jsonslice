@@ -317,7 +317,7 @@ func Test_Expressions(t *testing.T) {
 		// array of arrays
 		{`$.store.bicycle.equipment[1][0]`, []byte(`"peg leg"`)},
 		// filter expression not found -- not an error
-		//{`$.store.book[?($.store[0] > 0)]`, []byte(`[]`)},
+		// {`$.store.book[?($.store[0] > 0)]`, []byte(`[]`)},
 
 		// wildcard: any key within an object
 		{`$.store.book[0].*`, []byte(`["reference","Nigel Rees","Sayings of the Century",8.95]`)},
@@ -420,7 +420,6 @@ func Test_FuncNowRFC3339(t *testing.T) {
 	}
 
 	for _, tst := range tests {
-		// println(tst.Query)
 		actual, actualErr := Get(rfc3339Data, tst.Query)
 		expected, err := tst.expectedOutput(t, tst.testInput)
 		if actualErr != nil && err == nil {
