@@ -317,7 +317,7 @@ func Test_Expressions(t *testing.T) {
 		// array of arrays
 		{`$.store.bicycle.equipment[1][0]`, []byte(`"peg leg"`)},
 		// filter expression not found -- not an error
-		//{`$.store.book[?($.store[0] > 0)]`, []byte(`[]`)},
+		// {`$.store.book[?($.store[0] > 0)]`, []byte(`[]`)},
 
 		// wildcard: any key within an object
 		{`$.store.book[0].*`, []byte(`["reference","Nigel Rees","Sayings of the Century",8.95]`)},
@@ -420,7 +420,6 @@ func Test_FuncNowRFC3339(t *testing.T) {
 	}
 
 	for _, tst := range tests {
-		// println(tst.Query)
 		actual, actualErr := Get(rfc3339Data, tst.Query)
 		expected, err := tst.expectedOutput(t, tst.testInput)
 		if actualErr != nil && err == nil {
@@ -690,6 +689,8 @@ func Test_Fixes(t *testing.T) {
 		Query    string
 		Expected []byte
 	}{
+		// fixed in 1.1.3: now deep scan does not stop on first occurence of the key and keeps traversing deeper
+		{[]byte(`{ "k": [{"key": "some value"}, {"key":1}] }`), `$..[1].key`, []byte(`[1]`)},
 		// using indexing of array element inside expression
 		// fixed in 1.1.1
 		{[]byte(`[ [2,3], ["a"], [0,2], [2] ]`), `$[?(@[-1]==2)]`, []byte(`[[0,2],[2]]`)},
@@ -725,6 +726,11 @@ func Test_Fixes(t *testing.T) {
 			t.Errorf(tst.Query + "\n\texpected `" + string(tst.Expected) + "`\n\tbut got  `" + string(res) + "`")
 		}
 	}
+}
+
+func Test_FutureFixes(t *testing.T) {
+	// ref := `$[?(Q[)?8W?D-lIeM%|e9b33<sERpU.(2)&D`
+	// _, _, _ = readRef([]byte(ref), 1, 0)
 }
 
 func Test_Unicode(t *testing.T) {

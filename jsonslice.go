@@ -401,7 +401,7 @@ func detectFn(path []byte, i int, nod *tNode) (bool, int, error) {
 	return true, i + 2, nil
 }
 
-// returns value specified by nod or nil if no match
+// getValue returns value specified by nod or nil if no match
 // 'inside' specifies recursive mode
 func getValue(input []byte, nod *tNode, inside bool) (result []byte, err error) {
 
@@ -538,7 +538,7 @@ func objectValueByKey(input []byte, nod *tNode, inside bool) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if nod.Type&cDot > 0 && len(res) > 0 {
+		if nod.Type&cDot > 0 && len(res) > 0 && nod.Type&cDeep == 0 {
 			return res, nil
 		}
 	}
@@ -903,9 +903,13 @@ func processKey(
 				}
 			}
 			deep, err = getValue(input[i:e:e], nod, true) // deepscan
+			if err != nil {
+				return elems, res, i, err
+			}
 			if len(deep) > 0 {
 				res = plus(res, deep)
 			}
+			e, err = skipSpaces(input, e)
 		}
 	}
 	return elems, res, e, err
