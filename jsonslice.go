@@ -1109,7 +1109,7 @@ func doFunc(input []byte, nod *tNode) ([]byte, error) {
 		result, err = skipValue(input, 0)
 	} else if bytes.Equal(word("length"), nod.Keys[0]) || bytes.Equal(word("count"), nod.Keys[0]) {
 		if input[0] == '"' {
-			result, err = skipString(input, 0)
+			result, err = lengthString(input)
 		} else if input[0] == '[' {
 			i := 1
 			l := len(input)
@@ -1202,6 +1202,28 @@ func skipString(input []byte, i int) (int, error) {
 		return 0, errUnexpectedEnd
 	}
 	return i, nil
+}
+
+func lengthString(input []byte) (int, error) {
+	inQuote := false
+	start := -1
+
+	for i, b := range input {
+		if b == '"' {
+			if inQuote && i > 0 && input[i-1] != '\\' {
+				return i - start, nil
+			} else if !inQuote {
+				inQuote = true
+				start = i + 1
+			}
+		}
+	}
+
+	if inQuote {
+		return -1, errUnexpectedEnd // length -1 should be returned instead of 0 for erroneous inputs as a standard convention.
+	}
+
+	return 0, nil
 }
 
 func skipObject(input []byte, i int) (int, error) {
