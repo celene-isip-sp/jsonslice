@@ -247,6 +247,7 @@ func Test_Expressions(t *testing.T) {
 		{`$.store.book.length()`, []byte(`4`)},
 		{`$.store.book.count()`, []byte(`4`)},
 		{`$.store.book.size()`, []byte(`604`)},
+		{`$.store.book[3].author.length()`, []byte(`16`)},
 
 		// aggregated
 		{`$.store.book[1:3].author`, []byte(`["Evelyn Waugh","Herman Melville"]`)},
