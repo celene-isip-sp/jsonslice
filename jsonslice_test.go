@@ -248,6 +248,20 @@ func Test_Expressions(t *testing.T) {
 		{`$.store.book.count()`, []byte(`4`)},
 		{`$.store.book.size()`, []byte(`604`)},
 		{`$.store.book[3].author.length()`, []byte(`16`)},
+		// bool
+		{`$.store.open.JSON()`, []byte(`true`)},
+		// float64
+		{`$.store.book[0].price.JSON()`, []byte(`8.95`)},
+		// string
+		{`$.store.book[0].author.JSON()`, []byte(`"Nigel Rees"`)},
+		// []interface{}
+		{`$.store.book.JSON()`, []byte(`[{"author":"Nigel Rees","category":"reference","price":8.95,"title":"Sayings of the Century"},{"author":"Evelyn Waugh","category":"fiction","price":12.99,"title":"Sword of Honour"},{"author":"Herman Melville","category":"fiction","isbn":"0-553-21311-3","price":8.99,"title":"Moby Dick"},{"author":"J. R. R. Tolkien","category":"fiction","isbn":"0-395-19395-8","price":22.99,"title":"The Lord of the Rings"}]`)},
+		// []interface{}
+		{`$.store.manager.JSON()`, []byte(`[]`)},
+		// map[string]interface{}
+		{`$.store.book[0].JSON()`, []byte(`{"author":"Nigel Rees","category":"reference","price":8.95,"title":"Sayings of the Century"}`)},
+		// nil
+		{`$.store.branch.JSON()`, []byte(`null`)},
 
 		// aggregated
 		{`$.store.book[1:3].author`, []byte(`["Evelyn Waugh","Herman Melville"]`)},
@@ -342,13 +356,14 @@ func Test_Expressions(t *testing.T) {
 	}
 
 	for _, tst := range tests {
-		// println(tst.Query)
-		res, err := Get(data, tst.Query)
-		if err != nil {
-			t.Errorf(tst.Query + " : " + err.Error())
-		} else if compareSlices(res, tst.Expected) != 0 {
-			t.Errorf(tst.Query + "\n\texpected `" + string(tst.Expected) + "`\n\tbut got  `" + string(res) + "`")
-		}
+		t.Run(tst.Query, func(t *testing.T) {
+			res, err := Get(data, tst.Query)
+			if err != nil {
+				t.Errorf(tst.Query + " : " + err.Error())
+			} else if compareSlices(res, tst.Expected) != 0 {
+				t.Errorf(tst.Query + "\n\texpected `" + string(tst.Expected) + "`\n\tbut got  `" + string(res) + "`")
+			}
+		})
 	}
 }
 
@@ -364,18 +379,30 @@ func Test_FuncNow(t *testing.T) {
 	}
 
 	for _, tst := range tests {
-		// println(tst.Query)
-		actual, _ := Get(data, tst.Query)
-		expected, err := tst.expectedOutput(t)
-		if err != nil {
-			if actual != nil {
-				t.Errorf("\n\ttestName:" + tst.name + "testQuery:\n\t" + tst.Query + "\n\texpected `" + string("<nil>") + "`\n\tbut got  `" + string(actual) + "`")
+		t.Run(tst.name, func(t *testing.T) {
+			// we will set a custom time in order to run all tests with a fixed time
+			timeNowFuncHook = func() time.Time {
+				now, err := time.Parse(time.RFC3339, "2023-04-21T01:10:59Z")
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return now
 			}
-		} else {
-			if compareSlices(actual, expected) != 0 {
-				t.Errorf("\n\ttestName:" + tst.name + "\n\ttestQuery:" + tst.Query + "\n\texpected `" + string(expected) + "`\n\tbut got  `" + string(actual) + "`")
+
+			actual, _ := Get(data, tst.Query)
+
+			expected, err := tst.expectedOutput(t)
+			if err != nil {
+				if actual != nil {
+					t.Errorf("\n\ttestName:" + tst.name + "testQuery:\n\t" + tst.Query + "\n\texpected `" + string("<nil>") + "`\n\tbut got  `" + string(actual) + "`")
+				}
+			} else {
+				if compareSlices(actual, expected) != 0 {
+					t.Errorf("\n\ttestName:" + tst.name + "\n\ttestQuery:" + tst.Query + "\n\texpected `" + string(expected) + "`\n\tbut got  `" + string(actual) + "`")
+				}
 			}
-		}
+		})
 	}
 }
 
@@ -386,68 +413,94 @@ func Test_FuncNowRFC3339(t *testing.T) {
 		testInput      string
 		expectedOutput func(t *testing.T, s string) ([]byte, error)
 	}{
+		// TODO(juan.alvarez): functions cannot be chained in this package, look at jsonslice.go#L436, it says: `// no recurse`, so how this test case is a "happy path" test?
 		{"happy path", "$.now().RFC3339()", "", func(t *testing.T, s string) ([]byte, error) {
 			t.Helper()
-			tt, err := time.Parse(time.RFC3339, time.Now().Format("2006-01-02T15:04:05.000Z"))
+
+			tt, err := time.Parse(time.RFC3339, timeNowFuncHook().Format(utcDateFormat))
 			if err != nil {
 				return nil, err
 			}
-			expected, _ := json.Marshal(tt)
+
+			// format must be `.now()` format, [utcDateFormat], because this thing doesn't chain functions
+			expected, _ := json.Marshal(tt.Format(utcDateFormat))
 
 			return expected, nil
 		}},
 		{"happy path with date node", "$.store.founded.RFC3339()", "2022-09-18T07:25:40.20Z", func(t *testing.T, s string) ([]byte, error) {
 			t.Helper()
+
 			tt, err := time.Parse(time.RFC3339, s)
 			if err != nil {
 				return nil, err
 			}
+
 			expected, _ := json.Marshal(tt)
 
 			return expected, nil
 		}},
 		{"invalid input node, will return an empty array", "$.store.book[?(@.category==\"fiction\")].date.RFC3339()", "", func(t *testing.T, s string) ([]byte, error) {
 			t.Helper()
+
 			return []byte("[]"), nil
 		}},
 		{"invalid input node, will return an empty string", "$.store.random.RFC3339()", "", func(t *testing.T, s string) ([]byte, error) {
 			t.Helper()
+
 			return []byte(""), nil
 		}},
 		{"invalid input node, will return an empty string", "$.RFC3339()", "", func(t *testing.T, s string) ([]byte, error) {
 			t.Helper()
+
 			return nil, errors.New("RFC3339() is only applicable to string date that can be formatted to RFC3339")
 		}},
 	}
 
 	for _, tst := range tests {
-		actual, actualErr := Get(rfc3339Data, tst.Query)
-		expected, err := tst.expectedOutput(t, tst.testInput)
-		if actualErr != nil && err == nil {
-			t.Errorf("testName:%s\n,testQuery:%s\nunexepectedError:%v", tst.name, tst.Query, actualErr)
-		}
+		t.Run(tst.name, func(t *testing.T) {
+			// we will set a custom time in order to run all tests with a fixed time
+			timeNowFuncHook = func() time.Time {
+				now, err := time.Parse(time.RFC3339, "2007-10-09T22:50:01.23Z")
+				if err != nil {
+					t.Fatal(err)
+				}
 
-		if err != nil {
-			if actual != nil {
-				t.Errorf("testName:%s\n,testQuery:%s\nexpected:<nil> but got %s", tst.name, tst.Query, string(actual))
+				return now
 			}
-		} else if err != nil {
-			if actualErr != err {
-				t.Errorf("testName:%s\n,testQuery:%s\nexpectedErr:%v but got %v", tst.name, tst.Query, err, actualErr)
+
+			actual, actualErr := Get(rfc3339Data, tst.Query)
+
+			expected, err := tst.expectedOutput(t, tst.testInput)
+			if actualErr != nil && err == nil {
+				t.Errorf("\n\ttestName:%s\n\ttestQuery:%s\n\tunexepectedError:%v", tst.name, tst.Query, actualErr)
 			}
-		} else {
-			if compareSlices(actual, expected) != 0 {
-				t.Errorf("testName:%s\n,testQuery:%s\nexpected:%s but got %s", tst.name, tst.Query, string(expected), string(actual))
+
+			if err != nil {
+				if actual != nil {
+					t.Errorf("\n\ttestName:%s\n\ttestQuery:%s\n\texpected:<nil>\n\tbut got %s", tst.name, tst.Query, string(actual))
+				}
+			} else if err != nil {
+				if actualErr != err {
+					t.Errorf("\n\ttestName:%s\n\ttestQuery:%s\n\texpectedErr:%v\n\tbut got %v", tst.name, tst.Query, err, actualErr)
+				}
+			} else {
+				if compareSlices(actual, expected) != 0 {
+					t.Errorf("\n\ttestName:%s\n\ttestQuery:%s\n\texpected:%s\n\tbut got %s", tst.name, tst.Query, string(expected), string(actual))
+				}
 			}
-		}
+		})
 	}
 }
 
 // expectedSuccessfulFuncNow return expected output for successful function time now()
 func expectedSuccessfulFuncNow(t *testing.T) ([]byte, error) {
 	t.Helper()
-	tt := time.Now().Format("2006-01-02T15:04:05.000Z")
-	expected, _ := json.Marshal(tt)
+
+	tt := timeNowFuncHook().Format("2006-01-02T15:04:05.000Z")
+	expected, err := json.Marshal(tt)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	return expected, nil
 }
