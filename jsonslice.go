@@ -13,13 +13,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"regexp"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bhmj/xpression"
+)
+
+const (
+	utcDateFormat = "2006-01-02T15:04:05.000Z"
 )
 
 var (
@@ -39,7 +43,12 @@ var (
 	errUnexpectedStringEnd,
 	errObjectOrArrayExpected,
 	errInvalidNowUsage,
-	errorInvalidRFC3339 error
+	errInvalidRFC3339,
+	errInvalidJSON error
+)
+
+var (
+	timeNowFuncHook = time.Now
 )
 
 func init() {
@@ -66,7 +75,8 @@ func init() {
 	errObjectOrArrayExpected = errors.New("object or array expected")
 	errUnexpectedStringEnd = errors.New("unexpected end of string")
 	errInvalidNowUsage = errors.New("now() is only applicable to root of a valid JSON")
-	errorInvalidRFC3339 = errors.New("RFC3339() is only applicable to string date that can be formatted to RFC3339")
+	errInvalidRFC3339 = errors.New("RFC3339() is only applicable to string date that can be formatted to RFC3339")
+	errInvalidJSON = errors.New("JSON() was unable to convert result to JSON")
 }
 
 type word []byte
@@ -86,7 +96,7 @@ const (
 )
 
 type tNode struct {
-	//Key    word
+	// Key    word
 	Keys   []word
 	Type   int // properties
 	Slice  [3]int
@@ -393,7 +403,8 @@ func detectFn(path []byte, i int, nod *tNode) (bool, int, error) {
 		bytes.EqualFold(nod.Keys[0], []byte("count")) ||
 		bytes.EqualFold(nod.Keys[0], []byte("size")) ||
 		bytes.EqualFold(nod.Keys[0], []byte("now")) ||
-		bytes.EqualFold(nod.Keys[0], []byte("RFC3339"))) {
+		bytes.EqualFold(nod.Keys[0], []byte("RFC3339")) ||
+		bytes.EqualFold(nod.Keys[0], []byte("JSON"))) {
 		return true, i, errPathUnknownFunction
 	}
 	nod.Type |= cFunction
@@ -727,9 +738,9 @@ func collectRecurse(input []byte, nod *tNode, elems []tElem, res []byte, inside 
 	if nod.Type&cFullScan == 0 || nod.Type&cWild > 0 {
 		// special case 2): elems already listed
 		for i := 0; i < len(elems); i++ {
-			//if nod.Type&cWild > 0 {
+			// if nod.Type&cWild > 0 {
 			//	res = plus(res, input[elems[i].start:elems[i].end]) // wild
-			//}
+			// }
 			res, err = subSlice(input, nod, elems, i, res, inside) // recurse + deep
 			if err != nil {
 				return res, err
@@ -1103,14 +1114,29 @@ func matchSubslice(str, needle []byte) bool {
 }
 
 func doFunc(input []byte, nod *tNode) ([]byte, error) {
-	var err error
-	var result int
-	if bytes.Equal(word("size"), nod.Keys[0]) {
-		result, err = skipValue(input, 0)
-	} else if bytes.Equal(word("length"), nod.Keys[0]) || bytes.Equal(word("count"), nod.Keys[0]) {
+	switch {
+	case bytes.Equal(word("size"), nod.Keys[0]):
+		res, err := skipValue(input, 0)
+		if err != nil {
+			return nil, err
+		}
+
+		return []byte(strconv.Itoa(res)), nil
+
+	case bytes.Equal(word("length"), nod.Keys[0]) || bytes.Equal(word("count"), nod.Keys[0]):
 		if input[0] == '"' {
-			result, err = lengthString(input)
+			res, err := lengthString(input)
+			if err != nil {
+				return nil, err
+			}
+
+			return []byte(strconv.Itoa(res)), nil
 		} else if input[0] == '[' {
+			var (
+				res int
+				err error
+			)
+
 			i := 1
 			l := len(input)
 			// count elements
@@ -1119,55 +1145,69 @@ func doFunc(input []byte, nod *tNode) ([]byte, error) {
 				if err != nil {
 					return nil, err
 				}
-				result++
+
+				res++
 			}
+
+			return []byte(strconv.Itoa(res)), nil
 		} else {
 			return nil, errInvalidLengthUsage
 		}
-	} else if bytes.Equal(word("now"), nod.Keys[0]) {
+
+	case bytes.Equal(word("now"), nod.Keys[0]):
 		var val interface{}
-		err = json.Unmarshal(input, &val)
-		if err != nil {
+		if err := json.Unmarshal(input, &val); err != nil {
 			return nil, errInvalidNowUsage
 		}
 
-		//parse to ISO8601
-		t := time.Now().Format("2006-01-02T15:04:05.000Z")
-		res, _ := json.Marshal(t)
-		return res, nil
-	} else if bytes.Equal(word("RFC3339"), nod.Keys[0]) {
-		if input[0] == '"' {
-			//clean input, get first string.First string is anything between the first ""
-			val := string(input)
-
-			var re = regexp.MustCompile(`\".*?\"`)
-			x := re.FindStringSubmatch(val)
-
-			if len(x) > 0 {
-				val = strings.Replace(x[0], "\"", "", 2)
-
-				//parse to RFC3339
-				t, err := time.Parse(time.RFC3339, val)
-				if err != nil {
-					return nil, errorInvalidRFC3339
-				}
-
-				res, err := json.Marshal(t)
-				if err != nil {
-					return nil, errorInvalidRFC3339
-				}
-				return res, nil
-			} else {
-				return nil, errorInvalidRFC3339
-			}
-		} else {
-			return nil, errorInvalidRFC3339
+		// creates a time now with this layout: [utcDateFormat]
+		t := timeNowFuncHook().Format(utcDateFormat)
+		res, err := json.Marshal(t)
+		if err != nil {
+			return nil, err
 		}
+
+		return res, nil
+
+	case bytes.Equal(word("RFC3339"), nod.Keys[0]):
+		nodeValue, err := getValue(input, nod.Next, false)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errInvalidRFC3339, err)
+		}
+
+		// parse to RFC3339
+		t, err := time.Parse(time.RFC3339, strings.ReplaceAll(string(nodeValue), `"`, ""))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errInvalidRFC3339, err)
+		}
+
+		res, err := json.Marshal(t)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errInvalidRFC3339, err)
+		}
+
+		return res, nil
+
+	case bytes.Equal(word("JSON"), nod.Keys[0]):
+		nodeValue, err := getValue(input, nod.Next, false)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errInvalidJSON, err)
+		}
+
+		var v interface{}
+		if err := json.Unmarshal(nodeValue, &v); err != nil {
+			return nil, fmt.Errorf("%w: %w", errInvalidJSON, err)
+		}
+
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errInvalidJSON, err)
+		}
+
+		return b, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	return []byte(strconv.Itoa(result)), nil
+
+	return nil, nil
 }
 
 func skipSpaces(input []byte, i int) (int, error) {
