@@ -1,4 +1,4 @@
-module github.com/celene-isip-sp/jsonslice
+module github.com/sailpoint-oss/jsonslice
 
 go 1.17
 
