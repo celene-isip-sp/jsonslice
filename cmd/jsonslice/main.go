@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/celene-isip-sp/jsonslice"
+	"github.com/sailpoint-oss/jsonslice"
 )
 
 func main() {
